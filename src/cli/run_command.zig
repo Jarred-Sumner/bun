@@ -263,9 +263,7 @@ pub const RunCommand = struct {
 
         if (result.Exited > 0) {
             Output.prettyErrorln("<r><red>Script error<r> <b>\"{s}\"<r> exited with {d} status<r>", .{ name, result.Exited });
-            Output.flush();
-
-            Global.exit(result.Exited);
+            Global.exitOther(result.Exited);
         }
 
         return true;
@@ -304,18 +302,18 @@ pub const RunCommand = struct {
                     if (rc == 0) {
                         if (std.os.S.ISDIR(stat.mode)) {
                             Output.prettyErrorln("<r><red>error<r>: Failed to run directory \"<b>{s}<r>\"\n", .{executable});
-                            Global.exit(1);
+                            Global.crash();
                         }
                     }
                 }
             }
             Output.prettyErrorln("<r><red>error<r>: Failed to run \"<b>{s}<r>\" due to error <b>{s}<r>", .{ std.fs.path.basename(executable), @errorName(err) });
-            Global.exit(1);
+            Global.crash();
         };
 
         if (result.Exited > 0) {
             Output.prettyErrorln("<r><red>error<r> \"<b>{s}<r>\" exited with {d} status<r>", .{ std.fs.path.basename(executable), result.Exited });
-            Global.exit(result.Exited);
+            Global.exitOther(result.Exited);
         }
 
         return true;
@@ -626,7 +624,7 @@ pub const RunCommand = struct {
                             var shebang_buf: [64]u8 = undefined;
                             const shebang_size = file.pread(&shebang_buf, 0) catch |err| {
                                 Output.prettyErrorln("<r><red>error<r>: Failed to read file <b>{s}<r> due to error <b>{s}<r>", .{ file_path, @errorName(err) });
-                                Global.exit(1);
+                                Global.crash();
                             };
 
                             var shebang: string = shebang_buf[0..shebang_size];
@@ -649,7 +647,7 @@ pub const RunCommand = struct {
                                     std.fs.path.basename(file_path),
                                     @errorName(err),
                                 });
-                                Global.exit(1);
+                                Global.crash();
                             };
 
                             return true;
@@ -909,7 +907,7 @@ pub const RunCommand = struct {
         if (script_name_to_search.len == 0) {
             if (comptime log_errors) {
                 Output.prettyError("<r>No \"scripts\" in package.json found.\n", .{});
-                Global.exit(0);
+                Global.exit();
             }
 
             return false;
@@ -955,7 +953,7 @@ pub const RunCommand = struct {
 
         if (comptime log_errors) {
             Output.prettyError("<r><red>error:<r> Missing script \"<b>{s}<r>\"\n", .{script_name_to_search});
-            Global.exit(0);
+            Global.exit();
         }
 
         return false;

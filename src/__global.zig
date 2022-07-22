@@ -47,9 +47,24 @@ pub fn setThreadName(name: StringTypes.stringZ) void {
     }
 }
 
-pub fn exit(code: u8) noreturn {
+/// Flushes output and exits with a success status code.
+pub fn exit() noreturn {
     Output.flush();
-    std.os.exit(code);
+    std.os.exit(0);
+}
+
+/// Flushes output and exits with a failure status code.
+pub fn crash() noreturn {
+    @setCold(true);
+    Output.flush();
+    std.os.exit(1);
+}
+
+/// Flushes output and exits otherwise unsuccessfully with a specific exit code.
+pub fn exitOther(exit_code: u8) noreturn {
+    @setCold(true);
+    Output.flush();
+    std.os.exit(exit_code);
 }
 
 pub const AllocatorConfiguration = struct {
@@ -107,19 +122,13 @@ inline fn _invariant(comptime fmt: string, args: anytype) noreturn {
         @panic(fmt);
     } else {
         Output.prettyErrorln(fmt, args);
-        Global.exit(1);
+        Global.crash();
     }
 }
 
 pub fn notimpl() noreturn {
     @setCold(true);
     Global.panic("Not implemented yet!!!!!", .{});
-}
-
-// Make sure we always print any leftover
-pub fn crash() noreturn {
-    @setCold(true);
-    Global.exit(1);
 }
 
 const Global = @This();
