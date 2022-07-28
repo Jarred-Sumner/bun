@@ -113,7 +113,7 @@ pub const UpdateRequest = struct {
 };
 
 const std = @import("std");
-const default_allocator = @import("../global_allocators.zig").default_allocator;
+const default_allocator = @import("global").default_allocator;
 
 test "UpdateRequests.parse" {
     var log = logger.Log.init(default_allocator);
