@@ -257,9 +257,10 @@ pub fn build(b: *std.build.Builder) !void {
 
     var triplet = triplet_buf[0 .. osname.len + cpuArchName.len + 1];
 
-    if (std.os.getenv("OUTPUT_DIR")) |output_dir_| {
+    if (std.process.getEnvVarOwned(b.allocator, "OUTPUT_DIR")) |output_dir_| {
+        defer b.allocator.free(output_dir_);
         output_dir = output_dir_;
-    } else {
+    } else |_| {
         const output_dir_base = try std.fmt.bufPrint(&output_dir_buf, "{s}{s}", .{ bin_label, triplet });
         output_dir = b.pathFromRoot(output_dir_base);
     }
@@ -282,13 +283,21 @@ pub fn build(b: *std.build.Builder) !void {
     b.install_path = output_dir;
 
     var typings_exe = b.addExecutable("typescript-decls", "src/typegen.zig");
+    const blank_version: std.builtin.Version = .{ .major = 0, .minor = 0, .patch = 0 };
 
     const min_version: std.builtin.Version = if (target.getOsTag() != .freestanding)
-        target.getOsVersionMin().semver
-    else .{ .major = 0, .minor = 0, .patch = 0 };
+        if (target.os_version_min) |version|
+            version.semver
+        else
+            blank_version
+    else
+        blank_version;
 
     const max_version: std.builtin.Version = if (target.getOsTag() != .freestanding)
-        target.getOsVersionMax().semver
+        if (target.os_version_max) |version|
+            version.semver
+        else
+            blank_version
     else .{ .major = 0, .minor = 0, .patch = 0 };
 
     // exe.want_lto = true;
