@@ -25,6 +25,17 @@ Native: (macOS x64 & Silicon, Linux x64, Windows Subsystem for Linux)
 ```sh
 curl -fsSL https://bun.sh/install | bash
 ```
+or 
+```sh
+wget https://bun.sh/install
+```
+```sh
+chmod a+x ./install
+```
+```sh
+./install 
+```
+
 
 Docker: (Linux x64)
 
