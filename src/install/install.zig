@@ -46,7 +46,7 @@ const clap = @import("clap");
 const ExtractTarball = @import("./extract_tarball.zig");
 const Npm = @import("./npm.zig");
 const Bitset = @import("./bit_set.zig").DynamicBitSetUnmanaged;
-const z_allocator = @import("../memory_allocator.zig").z_allocator;
+const z_allocator = @import("../allocators/memory_allocator.zig").z_allocator;
 
 threadlocal var initialized_store = false;
 
@@ -86,49 +86,11 @@ const Dependency = @import("./dependency.zig");
 const Behavior = @import("./dependency.zig").Behavior;
 const FolderResolution = @import("./resolvers/folder_resolver.zig").FolderResolution;
 
+pub const ExternalSlice = @import("./external_slice.zig").ExternalSlice;
+pub const ExternalSliceAligned = @import("./external_slice.zig").ExternalSliceAligned;
+
 pub const ExternalStringBuilder = StructBuilder.Builder(ExternalString);
 pub const SmallExternalStringList = ExternalSlice(String);
-
-pub fn ExternalSlice(comptime Type: type) type {
-    return ExternalSliceAligned(Type, null);
-}
-
-pub fn ExternalSliceAligned(comptime Type: type, comptime alignment_: ?u29) type {
-    return extern struct {
-        const alignment = alignment_ orelse @alignOf(*Type);
-        const Slice = @This();
-
-        pub const Child: type = Type;
-
-        off: u32 = 0,
-        len: u32 = 0,
-
-        pub inline fn contains(this: Slice, id: u32) bool {
-            return id >= this.off and id < (this.len + this.off);
-        }
-
-        pub inline fn get(this: Slice, in: []const Type) []const Type {
-            // it should be impossible to address this out of bounds due to the minimum here
-            return in.ptr[this.off..@minimum(in.len, this.off + this.len)];
-        }
-
-        pub inline fn mut(this: Slice, in: []Type) []Type {
-            return in.ptr[this.off..@minimum(in.len, this.off + this.len)];
-        }
-
-        pub fn init(buf: []const Type, in: []const Type) Slice {
-            // if (comptime isDebug or isTest) {
-            //     std.debug.assert(@ptrToInt(buf.ptr) <= @ptrToInt(in.ptr));
-            //     std.debug.assert((@ptrToInt(in.ptr) + in.len) <= (@ptrToInt(buf.ptr) + buf.len));
-            // }
-
-            return Slice{
-                .off = @truncate(u32, (@ptrToInt(in.ptr) - @ptrToInt(buf.ptr)) / @sizeOf(Type)),
-                .len = @truncate(u32, in.len),
-            };
-        }
-    };
-}
 
 pub const PackageID = u32;
 pub const DependencyID = u32;
@@ -413,42 +375,7 @@ pub const Origin = enum(u8) {
     tarball = 2,
 };
 
-pub const Features = struct {
-    optional_dependencies: bool = false,
-    dev_dependencies: bool = false,
-    scripts: bool = false,
-    peer_dependencies: bool = true,
-    is_main: bool = false,
-    dependencies: bool = true,
-
-    check_for_duplicate_dependencies: bool = false,
-
-    pub fn behavior(this: Features) Behavior {
-        var out: u8 = 0;
-        out |= @as(u8, @boolToInt(this.dependencies)) << 1;
-        out |= @as(u8, @boolToInt(this.optional_dependencies)) << 2;
-        out |= @as(u8, @boolToInt(this.dev_dependencies)) << 3;
-        out |= @as(u8, @boolToInt(this.peer_dependencies)) << 4;
-        return @intToEnum(Behavior, out);
-    }
-
-    pub const folder = Features{
-        .optional_dependencies = true,
-        .dev_dependencies = true,
-        .scripts = false,
-        .peer_dependencies = true,
-        .is_main = false,
-        .dependencies = true,
-    };
-
-    pub const npm = Features{
-        .optional_dependencies = true,
-    };
-
-    pub const npm_manifest = Features{
-        .optional_dependencies = true,
-    };
-};
+pub const Features = @import("./dependency.zig").Features;
 
 pub const PreinstallState = enum(u2) {
     unknown = 0,
@@ -3593,106 +3520,7 @@ pub const PackageManager = struct {
     };
     const latest: string = "latest";
 
-    pub const UpdateRequest = struct {
-        name: string = "",
-        name_hash: PackageNameHash = 0,
-        resolved_version_buf: string = "",
-        version: Dependency.Version = Dependency.Version{},
-        version_buf: []const u8 = "",
-        missing_version: bool = false,
-        failed: bool = false,
-        // This must be cloned to handle when the AST store resets
-        e_string: ?*JSAst.E.String = null,
-
-        pub const Array = std.BoundedArray(UpdateRequest, 64);
-
-        pub fn parse(
-            allocator: std.mem.Allocator,
-            log: *logger.Log,
-            positionals: []const string,
-            update_requests: *Array,
-            op: Lockfile.Package.Diff.Op,
-        ) []UpdateRequest {
-            // first one is always either:
-            // add
-            // remove
-            for (positionals) |positional| {
-                var request = UpdateRequest{
-                    .name = positional,
-                };
-                var unscoped_name = positional;
-                request.name = unscoped_name;
-
-                // request.name = "@package..." => unscoped_name = "package..."
-                if (unscoped_name.len > 0 and unscoped_name[0] == '@') {
-                    unscoped_name = unscoped_name[1..];
-                }
-
-                // if there is a semver in package name...
-                if (std.mem.indexOfScalar(u8, unscoped_name, '@')) |i| {
-                    // unscoped_name = "package@1.0.0" => request.name = "package"
-                    request.name = unscoped_name[0..i];
-
-                    // if package was scoped, put "@" back in request.name
-                    if (unscoped_name.ptr != positional.ptr) {
-                        request.name = positional[0 .. i + 1];
-                    }
-
-                    // unscoped_name = "package@1.0.0" => request.version_buf = "1.0.0"
-                    if (unscoped_name.len > i + 1) request.version_buf = unscoped_name[i + 1 ..];
-                }
-
-                if (strings.hasPrefix("http://", request.name) or
-                    strings.hasPrefix("https://", request.name))
-                {
-                    if (Output.isEmojiEnabled()) {
-                        Output.prettyErrorln("<r>😢 <red>error<r><d>:<r> bun {s} http://url is not implemented yet.", .{
-                            @tagName(op),
-                        });
-                    } else {
-                        Output.prettyErrorln("<r><red>error<r><d>:<r> bun {s} http://url is not implemented yet.", .{
-                            @tagName(op),
-                        });
-                    }
-
-                    Global.exit(1);
-                }
-
-                request.name = std.mem.trim(u8, request.name, "\n\r\t");
-                if (request.name.len == 0) continue;
-
-                request.version_buf = std.mem.trim(u8, request.version_buf, "\n\r\t");
-
-                // https://github.com/npm/npm-package-arg/blob/fbaf2fd0b72a0f38e7c24260fd4504f4724c9466/npa.js#L330
-                if (strings.hasPrefix("https://", request.version_buf) or
-                    strings.hasPrefix("http://", request.version_buf))
-                {
-                    if (Output.isEmojiEnabled()) {
-                        Output.prettyErrorln("<r>😢 <red>error<r><d>:<r> bun {s} http://url is not implemented yet.", .{
-                            @tagName(op),
-                        });
-                    } else {
-                        Output.prettyErrorln("<r><red>error<r><d>:<r> bun {s} http://url is not implemented yet.", .{
-                            @tagName(op),
-                        });
-                    }
-
-                    Global.exit(1);
-                }
-
-                if (request.version_buf.len == 0) {
-                    request.missing_version = true;
-                } else {
-                    const sliced = SlicedString.init(request.version_buf, request.version_buf);
-                    request.version = Dependency.parse(allocator, request.version_buf, &sliced, log) orelse Dependency.Version{};
-                }
-                request.name_hash = String.Builder.stringHash(request.name);
-                update_requests.append(request) catch break;
-            }
-
-            return update_requests.slice();
-        }
-    };
+    pub const UpdateRequest = @import("./update_request.zig").UpdateRequest;
 
     fn updatePackageJSONAndInstall(
         ctx: Command.Context,
@@ -3839,7 +3667,7 @@ pub const PackageManager = struct {
             }
         }
 
-        var updates = UpdateRequest.parse(ctx.allocator, ctx.log, manager.options.positionals[1..], &update_requests, op);
+        var updates = UpdateRequest.parse(ctx.allocator, ctx.log, manager.options.positionals[1..], &update_requests, @tagName(op));
 
         if (ctx.log.errors > 0) {
             if (comptime log_level != .silent) {
@@ -5102,29 +4930,3 @@ pub const PackageManager = struct {
 };
 
 const Package = Lockfile.Package;
-
-test "UpdateRequests.parse" {
-    var log = logger.Log.init(default_allocator);
-    var array = PackageManager.UpdateRequest.Array.init(0) catch unreachable;
-
-    const updates: []const []const u8 = &.{
-        "@bacon/name",
-        "foo",
-        "bar",
-        "baz",
-        "boo@1.0.0",
-        "bing@latest",
-    };
-    var reqs = PackageManager.UpdateRequest.parse(default_allocator, &log, updates, &array, .add);
-
-    try std.testing.expectEqualStrings(reqs[0].name, "@bacon/name");
-    try std.testing.expectEqualStrings(reqs[1].name, "foo");
-    try std.testing.expectEqualStrings(reqs[2].name, "bar");
-    try std.testing.expectEqualStrings(reqs[3].name, "baz");
-    try std.testing.expectEqualStrings(reqs[4].name, "boo");
-    try std.testing.expectEqual(reqs[4].version.tag, Dependency.Version.Tag.npm);
-    try std.testing.expectEqualStrings(reqs[4].version.literal.slice("boo@1.0.0"), "1.0.0");
-    try std.testing.expectEqual(reqs[5].version.tag, Dependency.Version.Tag.dist_tag);
-    try std.testing.expectEqualStrings(reqs[5].version.literal.slice("bing@1.0.0"), "latest");
-    try std.testing.expectEqual(updates.len, 6);
-}

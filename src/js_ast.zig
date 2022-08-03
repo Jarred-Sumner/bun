@@ -16,7 +16,6 @@ const Ref = @import("ast/base.zig").Ref;
 const RefHashCtx = @import("ast/base.zig").RefHashCtx;
 const ObjectPool = @import("./pool.zig").ObjectPool;
 const ImportRecord = @import("import_record.zig").ImportRecord;
-const allocators = @import("allocators.zig");
 const JSC = @import("javascript_core");
 const HTTP = @import("http");
 const RefCtx = @import("./ast/base.zig").RefCtx;
@@ -1179,7 +1178,7 @@ pub const E = struct {
     ///     - static the function is React.jsxsDEV, "jsxs" instead of "jsx"
     ///     - one child? the function is React.jsxDEV,
     ///     - no children? the function is React.jsxDEV and children is an empty array.
-    /// `isStaticChildren`: https://github.com/facebook/react/blob/4ca62cac45c288878d2532e5056981d177f9fdac/packages/react/src/jsx/ReactJSXElementValidator.js#L369-L384 
+    /// `isStaticChildren`: https://github.com/facebook/react/blob/4ca62cac45c288878d2532e5056981d177f9fdac/packages/react/src/jsx/ReactJSXElementValidator.js#L369-L384
     ///     This flag means children is an array of JSX Elements literals.
     ///     The documentation on this is sparse, but it appears that
     ///     React just calls Object.freeze on the children array.
@@ -4147,7 +4146,7 @@ pub const Op = struct {
         bin_bitwise_xor_assign,
         /// Right-associative
         bin_nullish_coalescing_assign,
-        /// Right-associative 
+        /// Right-associative
         bin_logical_or_assign,
         /// Right-associative
         bin_logical_and_assign,
